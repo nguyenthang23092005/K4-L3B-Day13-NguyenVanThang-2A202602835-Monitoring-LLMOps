@@ -31,6 +31,14 @@ Giữ time range mặc định 60 phút, refresh 30 giây và hiển thị thres
 python scripts/validate_dashboard.py
 ```
 
+Repo có sẵn dashboard local không cần cài thêm thư viện. Chạy:
+
+```bash
+python scripts/dashboard.py
+```
+
+Sau đó mở `http://127.0.0.1:8501`. Dashboard đọc lại `data/logs.jsonl` mỗi 30 giây và chỉ lấy dữ liệu trong 60 phút gần nhất.
+
 Validator kiểm tra cấu trúc contract; nó không thể chứng minh biểu đồ trong ảnh dùng đúng dữ liệu. Evidence runtime vẫn bắt buộc.
 
 ## Cách kiểm tra runtime

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monitoring &amp; LLMOps Dashboard</title>
+  <style>
+    :root { color-scheme: dark; --bg:#07111f; --panel:#101c2e; --panel-2:#14243a; --text:#e8f0fb; --muted:#8da2bd; --grid:#263850; --cyan:#42d3ff; --green:#46df9a; --amber:#ffbf69; --red:#ff6b7a; --purple:#b794f6; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:radial-gradient(circle at top left,#10233c 0,#07111f 42%); color:var(--text); font:14px/1.45 Inter,ui-sans-serif,system-ui,sans-serif; min-height:100vh; }
+    main { max-width:1500px; margin:auto; padding:24px; }
+    header { display:flex; justify-content:space-between; gap:24px; align-items:end; margin-bottom:20px; }
+    h1 { margin:0 0 4px; font-size:25px; font-weight:650; letter-spacing:-.02em; }
+    .subtitle,.status { color:var(--muted); }
+    .status { text-align:right; font-variant-numeric:tabular-nums; }
+    .live { display:inline-block; width:8px; height:8px; margin-right:7px; border-radius:50%; background:var(--green); box-shadow:0 0 12px var(--green); }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+    .panel { min-width:0; padding:18px; background:linear-gradient(145deg,var(--panel-2),var(--panel)); border:1px solid #243650; border-radius:14px; box-shadow:0 16px 45px rgba(0,0,0,.18); }
+    .panel-head { display:flex; justify-content:space-between; align-items:start; gap:12px; }
+    h2 { margin:0; font-size:15px; font-weight:650; }
+    .unit { color:var(--muted); font-size:12px; }
+    .metrics { display:flex; flex-wrap:wrap; gap:15px; margin:15px 0 8px; }
+    .metric { min-width:72px; }
+    .metric strong { display:block; font-size:20px; font-weight:650; font-variant-numeric:tabular-nums; }
+    .metric span { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+    .threshold { color:var(--amber); font-size:12px; white-space:nowrap; }
+    svg { width:100%; height:170px; display:block; overflow:visible; }
+    .axis { fill:var(--muted); font-size:10px; }
+    .gridline { stroke:var(--grid); stroke-width:1; }
+    .threshold-line { stroke:var(--amber); stroke-width:1.5; stroke-dasharray:5 5; }
+    .line { fill:none; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+    .empty { color:var(--muted); height:170px; display:grid; place-items:center; }
+    .legend { display:flex; flex-wrap:wrap; gap:12px; color:var(--muted); font-size:11px; min-height:16px; }
+    .legend i { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; }
+    .error { display:none; margin-bottom:16px; padding:10px 12px; color:#ffd8dc; background:#411a25; border-radius:8px; }
+    @media (max-width:1100px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width:700px) { main { padding:16px; } header { align-items:start; flex-direction:column; } .status { text-align:left; } .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>K4-L3B Monitoring &amp; LLMOps</h1><div class="subtitle">Source: data/logs.jsonl · UTC · rolling 60 minutes</div></div>
+    <div class="status"><span class="live"></span>Auto refresh 30s<br><span id="updated">Loading…</span></div>
+  </header>
+  <div id="error" class="error" role="alert"></div>
+  <section class="grid">
+    <article class="panel" id="latency"><div class="panel-head"><div><h2>Latency percentiles and TTFT</h2><span class="unit">milliseconds</span></div><span class="threshold">P95 ≤ 3,000 ms</span></div><div class="metrics"></div><div class="legend"></div><div class="chart"></div></article>
+    <article class="panel" id="traffic"><div class="panel-head"><div><h2>Request traffic</h2><span class="unit">requests / minute</span></div><span class="threshold">≥ 1 req/min</span></div><div class="metrics"></div><div class="legend"></div><div class="chart"></div></article>
+    <article class="panel" id="errors"><div class="panel-head"><div><h2>Error rate and retrieval success</h2><span class="unit">percent</span></div><span class="threshold">Errors ≤ 2%</span></div><div class="metrics"></div><div class="legend"></div><div class="chart"></div></article>
+    <article class="panel" id="cost"><div class="panel-head"><div><h2>Cost over time</h2><span class="unit">USD</span></div><span class="threshold">Total ≤ $2.50</span></div><div class="metrics"></div><div class="legend"></div><div class="chart"></div></article>
+    <article class="panel" id="tokens"><div class="panel-head"><div><h2>Input and output tokens</h2><span class="unit">tokens</span></div><span class="threshold">Total ≤ 50,000</span></div><div class="metrics"></div><div class="legend"></div><div class="chart"></div></article>
+    <article class="panel" id="quality"><div class="panel-head"><div><h2>Quality proxy</h2><span class="unit">score 0–1</span></div><span class="threshold">Mean ≥ 0.75</span></div><div class="metrics"></div><div class="legend"></div><div class="chart"></div></article>
+  </section>
+</main>
+<script>
+const colors={cyan:'#42d3ff',green:'#46df9a',amber:'#ffbf69',red:'#ff6b7a',purple:'#b794f6'};
+const n=(value,digits=0)=>Number(value||0).toLocaleString(undefined,{maximumFractionDigits:digits,minimumFractionDigits:digits});
+function metrics(id,items){document.querySelector(`#${id} .metrics`).innerHTML=items.map(([label,value])=>`<div class="metric"><strong>${value}</strong><span>${label}</span></div>`).join('');}
+function legend(id,series){document.querySelector(`#${id} .legend`).innerHTML=series.map(s=>`<span><i style="background:${s.color}"></i>${s.label}</span>`).join('');}
+function chart(id,points,series,threshold){
+  const host=document.querySelector(`#${id} .chart`); legend(id,series);
+  if(!points.length){host.innerHTML='<div class="empty">No events in the last 60 minutes</div>';return;}
+  const W=600,H=170,m={l:42,r:12,t:12,b:25};
+  const vals=series.flatMap(s=>points.map(p=>Number(p[s.key]||0))); if(threshold!==null) vals.push(Number(threshold));
+  let max=Math.max(...vals,1),min=Math.min(...vals,0); if(max===min) max=min+1;
+  const x=i=>m.l+(i/(Math.max(points.length-1,1)))*(W-m.l-m.r), y=v=>m.t+(max-v)/(max-min)*(H-m.t-m.b);
+  let svg=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${id} over the last 60 minutes">`;
+  [0,.5,1].forEach(t=>{const yy=m.t+t*(H-m.t-m.b),v=max-t*(max-min);svg+=`<line class="gridline" x1="${m.l}" y1="${yy}" x2="${W-m.r}" y2="${yy}"/><text class="axis" x="${m.l-6}" y="${yy+3}" text-anchor="end">${n(v,max<10?2:0)}</text>`});
+  if(threshold!==null) svg+=`<line class="threshold-line" x1="${m.l}" y1="${y(threshold)}" x2="${W-m.r}" y2="${y(threshold)}"/>`;
+  series.forEach(s=>{const d=points.map((p,i)=>`${i?'L':'M'}${x(i)},${y(Number(p[s.key]||0))}`).join(' ');svg+=`<path class="line" stroke="${s.color}" d="${d}"/>`});
+  const first=new Date(points[0].ts),last=new Date(points.at(-1).ts);svg+=`<text class="axis" x="${m.l}" y="${H-5}">${first.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</text><text class="axis" x="${W-m.r}" y="${H-5}" text-anchor="end">${last.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</text></svg>`;
+  host.innerHTML=svg;
+}
+async function refresh(){
+  try{
+    const r=await fetch('/api/dashboard',{cache:'no-store'});if(!r.ok)throw new Error(`HTTP ${r.status}`);const d=await r.json(),s=d.summary,p=d.points,t=d.thresholds;
+    document.getElementById('error').style.display='none';document.getElementById('updated').textContent=`Updated ${new Date(d.generated_at).toLocaleTimeString()} · ${s.request_count} requests`;
+    metrics('latency',[['P50',`${n(s.latency_p50)} ms`],['P95',`${n(s.latency_p95)} ms`],['P99',`${n(s.latency_p99)} ms`],['TTFT P95',`${n(s.ttft_p95)} ms`]]);chart('latency',p,[{key:'latency_p95',label:'Latency P95',color:colors.cyan},{key:'ttft_p95',label:'TTFT P95',color:colors.purple}],t.latency);
+    metrics('traffic',[['Requests',n(s.request_count)],['Avg rate',`${n(s.rate_per_minute,2)}/min`]]);chart('traffic',p,[{key:'requests',label:'Requests/min',color:colors.green}],t.traffic);
+    metrics('errors',[['Error rate',`${n(s.error_rate,2)}%`],['Retrieval',`${n(s.retrieval_success,1)}%`]]);chart('errors',p,[{key:'error_rate',label:'Error rate',color:colors.red},{key:'retrieval_success',label:'Retrieval success',color:colors.green}],t.errors);
+    metrics('cost',[['Total',`$${n(s.cost_total,4)}`]]);chart('cost',p,[{key:'cost',label:'Cost/min',color:colors.amber}],t.cost);
+    metrics('tokens',[['Input',n(s.tokens_in)],['Output',n(s.tokens_out)],['Total',n(s.tokens_in+s.tokens_out)]]);chart('tokens',p,[{key:'tokens_in',label:'Input',color:colors.cyan},{key:'tokens_out',label:'Output',color:colors.purple}],t.tokens);
+    metrics('quality',[['Mean',n(s.quality_avg,3)]]);chart('quality',p,[{key:'quality',label:'Quality mean',color:colors.green}],t.quality);
+  }catch(e){const box=document.getElementById('error');box.textContent=`Dashboard refresh failed: ${e.message}`;box.style.display='block';}
+}
+refresh();setInterval(refresh,30000);window.addEventListener('resize',refresh);
+</script>
+</body>
+</html>
